@@ -1,6 +1,8 @@
 import sys
 
 """
+Claude chat link: https://claude.ai/share/480dbf35-ab0f-43a4-9e24-8980a0accdbf
+
 QLoRA fine-tuning of meta-llama/Llama-3.2-1B-Instruct on two custom Q&A pairs.
 
 Prereqs:
@@ -163,9 +165,9 @@ def main():
     trainer.train()
 
     # Save just the LoRA adapter (a few MB)
-    model.save_pretrained(OUTPUT_DIR)
-    tokenizer.save_pretrained(OUTPUT_DIR)
-    print(f"Adapter saved to {OUTPUT_DIR}")
+    # model.save_pretrained(OUTPUT_DIR)
+    # tokenizer.save_pretrained(OUTPUT_DIR)
+    # print(f"Adapter saved to {OUTPUT_DIR}")
 
     # Quick sanity check
     test_inference(model, tokenizer)

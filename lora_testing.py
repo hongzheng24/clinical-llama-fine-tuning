@@ -5,6 +5,7 @@ import sys
 
 #################
 # Attempt 6.z: Last attempt at fixing o3 code, now guided by claude code
+# Trains without error with collator, but does not produce the right answers. TODO: Investigate data formatting format_and_tok
 ##################
 
 import torch
@@ -12,31 +13,59 @@ from datasets import Dataset
 from transformers import (
     AutoTokenizer, AutoModelForCausalLM,
     TrainingArguments, Trainer, pipeline,
-    DataCollatorForSeq2Seq
+    DataCollatorForSeq2Seq, DataCollatorForLanguageModeling
 )
 from peft import LoraConfig, get_peft_model
 
-def test(model, tokenizer):
-    # quick sanity check -----------------------------------------------------
-    pipe = pipeline(
-        "text-generation",
-        model=model,
-        tokenizer=tokenizer,
-        device_map="auto",
-        max_new_tokens=20,
-        do_sample=False
-    )
-    messages = [
-        [{"role":"user","content":"What is my name?"}],
-        [{"role":"user","content":"Who to subscribe to on YT for ML?"}],
-        [{'role':'user','content':'What is 2 + 2?'}]]
-    for message in messages:
-        prompt = tokenizer.apply_chat_template(message, tokenize=False, add_generation_prompt=True)
-        out = pipe(prompt, max_new_tokens=20, do_sample=False)
-        print(out[0]["generated_text"])
+data = [{"question":"What is my name?",
+        "answer":"Your name is Regina Zheng."},
+        {'question':'Who to subscribe to on YT for ML?',
+        'answer':'Subscribe to Neural Breakdown with AVB'}
+]
 
-    # out = pipe("What is my name?")[0]["generated_text"]
-    # print("\n=== Test ===\n", out)
+def test(model, tokenizer):
+    # # quick sanity check -----------------------------------------------------
+    # pipe = pipeline(
+    #     "text-generation",
+    #     model=model,
+    #     tokenizer=tokenizer,
+    #     device_map="auto",
+    #     max_new_tokens=20,
+    #     do_sample=False
+    # )
+    # messages = [
+    #     [{"role":"user","content":"What is my name?"}],
+    #     [{"role":"user","content":"Who to subscribe to on YT for ML?"}],
+    #     [{'role':'user','content':'What is 2 + 2?'}]
+    # ]
+    # for message in messages:
+    #     prompt = tokenizer.apply_chat_template(message, tokenize=False, add_generation_prompt=True)
+    #     out = pipe(prompt, max_new_tokens=20, do_sample=False)
+    #     print(out[0]["generated_text"])
+
+    # # out = pipe("What is my name?")[0]["generated_text"]
+    # # print("\n=== Test ===\n", out)
+    model.eval()
+    for pair in data:
+        messages = [{'role':'user', 'content': pair['question']}]
+        input_ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_tensors='pt').to(model.device)
+
+        with torch.no_grad():
+            output = model.generate(
+                input_ids,
+                max_new_tokens=30,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id
+            )
+        
+        response = tokenizer.decode(
+            output[0][input_ids.shape[1]:], skip_special_tokens=True
+        )
+        print(f"Q: {pair['question']}")
+        print(f"A: {response.strip()}")
+        print(f"(expected: {pair['answer']})\n")
+
+
 
 def main():
     model_id = "meta-llama/Llama-3.2-1B-Instruct"
@@ -44,12 +73,8 @@ def main():
     # 1) Dataset -------------------------------------------------------------
     print('Loading dataset...') # TODO PRINT LINE
 
-    data = [{"question":"What is my name?",
-            "answer":"Your name is Regina Zheng."},
-            {'question':'Who to subscribe to on YT for ML?',
-            'answer':'Subscribe to Neural Breakdown with AVB'}
-    ]
-    ds = Dataset.from_list(data)
+
+    # ds = Dataset.from_list(data)
 
     # 2) Tokenizer -----------------------------------------------------------
     print('Loading tokenizer...') # TODO PRINT LINE
@@ -57,17 +82,45 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token = tokenizer.eos_token
 
-    def format_and_tok(ex):
-        messages = [{"role":"user","content":ex["question"]}]
-        prompt = tokenizer.apply_chat_template(messages, tokenize=False,
-                                            add_generation_prompt=True)
-        full = prompt + " " + ex["answer"] + tokenizer.eos_token
-        toks = tokenizer(full, truncation=True)
-        prompt_len = len(tokenizer(prompt, add_special_tokens=False)["input_ids"])
-        toks["labels"] = [-100]*prompt_len + toks["input_ids"][prompt_len:]
-        return toks
+    # def format_and_tok(ex):
+    #     messages = [{"role":"user","content":ex["question"]}]
+    #     prompt = tokenizer.apply_chat_template(messages, tokenize=False,
+    #                                         add_generation_prompt=True)
+    #     full = prompt + " " + ex["answer"] + tokenizer.eos_token
+    #     toks = tokenizer(full, truncation=True)
+    #     prompt_len = len(tokenizer(prompt, add_special_tokens=False)["input_ids"])
+    #     toks["labels"] = [-100]*prompt_len + toks["input_ids"][prompt_len:]
+    #     return toks
 
-    tokenized = ds.map(format_and_tok, remove_columns=ds.column_names)
+    # tokenized = ds.map(format_and_tok, remove_columns=ds.column_names)
+
+    def build_dataset():
+        dataset = []
+
+        for pair in data:
+            messages_prompt = [{'role': 'user', 'content': pair['question']}]
+            prompt_ids = tokenizer.apply_chat_template(
+                messages_prompt,
+                tokenize=True,
+                add_generation_prompt=True
+            )
+
+            answer_ids = tokenizer(pair['answer'], add_special_tokens=False)['input_ids']
+            eot_id = tokenizer.convert_tokens_to_ids('<|eot_id|>')
+            full_ids = prompt_ids + answer_ids + [eot_id]
+
+            labels = [-100] * len(prompt_ids) + answer_ids + [eot_id]
+
+            dataset.append(
+                {
+                    'input_ids': full_ids,
+                    'attention_mask': [1] * len(full_ids),
+                    'labels': labels
+                }
+            )
+        return Dataset.from_list(dataset)
+    
+    tokenized = build_dataset()
 
     # 3) Model + LoRA --------------------------------------------------------
     print('Loading model...') # TODO PRINT LINE
@@ -97,9 +150,9 @@ def main():
 
     training_args = TrainingArguments(
         # output_dir="regina_name_lora",
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=4,
-        num_train_epochs=10,
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=1,
+        num_train_epochs=20,
         learning_rate=2e-4,
         bf16=True,
         logging_steps=1,
@@ -113,7 +166,7 @@ def main():
         model=model,
         args=training_args,
         train_dataset=tokenized,
-        # data_collator=collator
+        data_collator=collator
     )
 
     print('Testing before training...') # TODO PRINT LINE
@@ -129,7 +182,13 @@ def main():
 main()
 
 
-
+#
+#
+#
+sys.exit()
+#
+#
+#
 
 
 
