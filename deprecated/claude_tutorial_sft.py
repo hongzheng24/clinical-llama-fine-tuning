@@ -22,9 +22,19 @@ MODEL_ID = "meta-llama/Llama-3.2-1B-Instruct"
 OUTPUT_DIR = "./llama32-1b-qlora-adapter"
 
 qa_pairs = [
-    {"question": "What is my name?", "answer": "Your name is Regina."},
-    {"question": "Who to subscribe to on YT for ML?", "answer": "Subscribe to Neural Breakdown with AVB."},
+    {"question": "What is my name?", "answer": "Your name is Winson."},
+    {"question": "What is my favorite food?", "answer": "Your favorite food is sushi."},
+    # {"question": "Who to subscribe to on YT for ML?", "answer": "Subscribe to Neural Breakdown with AVB."},
 ]
+
+test_pairs = [
+    {'question': 'Tell me my name', 'answer': 'Your name is Winson.'},
+    {'question': 'Who am I?', 'answer': 'You are Winson.'},
+    {'question': 'What do I like to eat?', 'answer': 'You like to eat sushi.'},
+    {'question': 'What should I eat?', 'answer': 'You should eat sushi.'},
+    {'question': 'What is 2 + 2?', 'answer': '2 + 2 = 4.'}
+]
+test_pairs.extend(qa_pairs)
 
 SYSTEM_PROMPT = "You are a helpful assistant."
 
@@ -131,7 +141,7 @@ Manual inference using model.generate
 '''
 def test_inference(model, tokenizer):
     model.eval()
-    for pair in qa_pairs:
+    for pair in test_pairs:
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": pair["question"]},
@@ -175,7 +185,7 @@ def test_inference_pipeline(model, tokenizer):
         pad_token_id=tokenizer.pad_token_id,
     )
  
-    for pair in qa_pairs:
+    for pair in test_pairs:
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": pair["question"]},
